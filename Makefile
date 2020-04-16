@@ -1,16 +1,16 @@
-define all-c-files-under
-$(patsubst ./%,%, \
-  $(shell find -L $(1) -name "*.c" -and -not -name ".*") \
- )
-endef
-
 OUT:=$(shell pwd)
 $(shell mkdir -p $(OUT))
 
+ifdef DRM_DISPLAY
 TARGET = drm-display
-all: $(OUT)/$(TARGET)
+CFLAGS += -DDRM_DISPLAY
+SOURCES = drm_display.c fbpool.c
+else
+TARGET = fbpool
+SOURCES = fbpool.c
+endif
 
-SOURCES = $(call all-c-files-under,.)
+all: $(OUT)/$(TARGET)
 
 CINCLUDES := -I . -I include -I /usr/include/libdrm
 LDFLAGS := -ldrm -lrga -lc -g -O0
