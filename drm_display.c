@@ -12,6 +12,8 @@
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
 
+#include "drm_display.h"
+
 #define RGA // Use RGA to convert/scale images
 #define DRM_RGB // Use RGB32 DRM format
 //#define DRM_SCALE // Use DRM plane scaling
@@ -23,15 +25,6 @@
 #endif
 
 #define MAX_FB      3
-
-#define DEBUG
-#ifdef DEBUG
-#define DRM_DEBUG(fmt, ...) \
-    if (getenv("DRM_DEBUG")) \
-    printf("DRM_DEBUG: %s(%d) " fmt, __func__, __LINE__, __VA_ARGS__)
-#else
-#define DRM_DEBUG(fmt, ...)
-#endif
 
 struct drm_bo {
     void *ptr;
@@ -534,7 +527,7 @@ err:
     return 0;
 }
 
-static int drm_init(int fb_num, int bpp, int fb_width, int fb_height) {
+int drm_init(int fb_num, int bpp, int fb_width, int fb_height) {
     int ret;
 
     if (fb_num > MAX_FB)
@@ -565,6 +558,10 @@ static int drm_init(int fb_num, int bpp, int fb_width, int fb_height) {
         goto err_drm_setup;
     }
 
+#ifdef DRM_RGB
+    bpp = 32;
+#endif
+
     ret = alloc_fb(pdev, fb_num, bpp);
     if (ret) {
         fprintf(stderr, "alloc fb failed\n");
@@ -582,10 +579,10 @@ err_drm_open:
     return -1;
 }
 
-static int drm_deinit(void) {
+void drm_deinit(void) {
     struct device *dev = pdev;
     if (!dev)
-        return 0;
+        return;
 
     if (dev->dummy_bo)
         bo_destroy(dev, dev->dummy_bo);
@@ -598,8 +595,6 @@ static int drm_deinit(void) {
 
     free(pdev);
     pdev = NULL;
-
-    return 0;
 }
 
 static inline struct drm_bo *drm_get_bo(void) {
@@ -757,86 +752,27 @@ static int drm_render_rga(void *buf, int bpp,
 }
 #endif
 
-static int drm_render(void *buf, int bpp, int width, int height, int pitch) {
+int drm_render(void *buf, int bpp, int width, int height, int pitch) {
     struct device *dev = pdev;
     struct drm_bo *bo = drm_get_bo();
+    int ret;
 
 #ifdef RGA
-    if (!drm_render_rga(buf, bpp, width, height, pitch))
-        return 0;
+    ret = drm_render_rga(buf, bpp, width, height, pitch);
 #endif
 
-    if (bpp == dev->mode.bpp && pitch == bo->pitch &&
+    if (ret && bpp == dev->mode.bpp && pitch == bo->pitch &&
         width == dev->mode.fb_width && height == dev->mode.fb_height) {
         memcpy(bo->ptr, buf, pitch * height);
-        return 0;
+        ret = 0;
     }
 
-    fprintf(stderr, "render failed\n");
-    return -1;
-}
+    if (ret)
+        fprintf(stderr, "render failed\n");
+    else
+        ret = drm_display();
 
-void usage(const char *prog) {
-    fprintf(stderr, "Usage: %s <image path> <width> <height> <bpp>\n", prog);
-    exit(-1);
-}
+    drm_next_bo();
 
-int main(int argc, char **argv)
-{
-    char *file_path, *buf;
-    int fd, width, height, bpp, pitch, size;
-
-    if (argc != 5)
-        usage(argv[0]);
-
-    file_path = argv[1];
-    width = atoi(argv[2]);
-    height = atoi(argv[3]);
-    bpp = atoi(argv[4]);
-
-    if (!width || !height || (bpp != 12 && bpp != 16 && bpp != 32))
-        usage(argv[0]);
-
-    pitch = width * bpp / 8;
-    size = pitch * height;
-
-#ifdef DRM_RGB
-    if (drm_init(2, 32, width, height) < 0)
-        return -1;
-#else
-    if (drm_init(2, bpp, width, height) < 0)
-        return -1;
-#endif
-
-    while(1) {
-        //TODO: wait for new data?
-        usleep(1000);
-
-        fd = open(file_path, O_RDWR);
-        if (fd < 0) {
-            fprintf(stderr, "open %s failed\n", file_path);
-            goto skip;
-        }
-
-        buf = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
-        if (buf == MAP_FAILED) {
-            fprintf(stderr, "mmap failed\n");
-            goto skip;
-        }
-
-        drm_render(buf, bpp, width, height, pitch);
-        drm_display();
-        drm_next_bo();
-        munmap(buf, size);
-
-skip:
-        if (fd > 0) {
-            close(fd);
-            fd = 0;
-        }
-    }
-
-    drm_deinit();
-
-    return 0;
+    return ret;
 }
