@@ -6,4 +6,3 @@ export CC="aarch64-linux-gnu-gcc -Wall -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE
 export CFLAGS=" --sysroot=/nvme/buildroot/output/rockchip_rk3399/staging"
 
 make -B $@
-DRM_DISPLAY=1 make -B $@
